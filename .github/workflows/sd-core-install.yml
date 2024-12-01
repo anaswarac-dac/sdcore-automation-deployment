@@ -1,0 +1,75 @@
+name: GHCR - Install SD-Core 5G
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_ip:
+        description: 'The server IP address'
+        required: true
+        default: '172.105.57.206'
+      branch_name:
+        description: 'The branch name to use'
+        required: true
+        default: 'main'
+
+jobs:
+  install:
+    runs-on: [self-hosted]  # Using our own self hosted runner
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: Set Up Variables
+        run: |
+          echo "SERVER_IP=${{ github.event.inputs.server_ip }}" >> $GITHUB_ENV
+          echo "BRANCH_NAME=${{ github.event.inputs.branch_name }}" >> $GITHUB_ENV
+
+      - name: Install Prerequisites
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y git curl make net-tools pipx python3-venv sshpass netplan.io iptables jq docker.io sed
+          pipx install --include-deps ansible || true  # Ignore if already installed
+          pipx ensurepath
+          make --version  # Verify make installation
+          echo "PATH=\$PATH:/usr/bin:/home/rishi/.local/bin" >> $GITHUB_ENV
+          source $GITHUB_ENV  # Ensure new PATH is applied
+
+      - name: Debug PATH and Installed Tools
+        run: |
+          echo "Current PATH: $PATH"
+          which sed || echo "sed not found"
+          ls -l /usr/bin/sed || echo "/usr/bin/sed not found"
+
+
+      - name: Update Configuration Files
+        shell: bash
+        run: |
+          # Replace content of line 2 with the new node1 IP and credentials
+          #sed -i '2s/.*/node1 ansible_host=localhost ansible_user=rishi ansible_password=redhat ansible_sudo_pass=redhat/' hosts.ini
+
+          ##sed -i '3s/^/#/' hosts.ini
+          #sed -i '10s/^/#/' hosts.ini
+          #sed -i '11s/^/#/' hosts.ini
+
+          # Verify the updated hosts.ini content
+          echo "Updated hosts.ini content:"
+          cat hosts.ini
+
+      - name: Set up Docker authentication for GHCR
+        run: |
+          sudo docker login ghcr.io -u "${{ secrets.GHCRUSER }}" --password-stdin <<< "${{ secrets.GHCRPASS }}"
+          
+      - name: Install Kubernetes
+        shell: bash 
+        run: |
+          make aether-k8s-install  # Running from repo home
+        
+      - name: Install SD-Core
+        run: |
+          make aether-5gc-install  # Running from repo home
+          kubectl get pods -n omec
+
+      - name: Install Management Application
+        run: |
+          make aether-amp-install  # Running from repo home
